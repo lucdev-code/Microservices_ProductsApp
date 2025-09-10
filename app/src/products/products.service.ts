@@ -1,7 +1,8 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { PrismaClient } from '@prisma/client';
+import { PaginationDto } from 'src/common/pagination.dto';
 
 @Injectable()
 export class ProductsService extends PrismaClient implements OnModuleInit {
@@ -13,22 +14,90 @@ export class ProductsService extends PrismaClient implements OnModuleInit {
     this.logger.log('Products database already connected')
   }
   create(createProductDto: CreateProductDto) {
-    return 'This action adds a new product';
+    return this.product.create({ data: createProductDto })
   }
 
-  findAll() {
-    return `This action returns all products`;
+  async findAll(paginationDto: PaginationDto) {
+
+    const { page = 1, limit = 10 } = paginationDto;
+    const allProducts = await this.product.count({ where: { available:  true }});
+    const lastPage = Math.ceil(allProducts / limit);
+
+    if (page > lastPage) {
+      return {
+        message: 'Has llegado al limite de paginas'
+      }
+    };
+
+    return {
+      data: await this.product.findMany({
+        skip: (page - 1) * limit,
+        take: limit,
+        omit: {
+          updateAt: true
+        },
+        where: {
+          available: true
+        }
+      }),
+      info: {
+        "Current page": page,
+        "Lastpage": lastPage,
+        "Total products": allProducts,
+      }
+    };
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} product`;
+  async findOne(id: number) {
+
+    const product = await this.product.findUnique({
+      where: { id, available: true }
+    });
+
+    if (!product) {
+      throw new NotFoundException(`Product with id: #${id} was not found`);
+    }
+
+    return product;
   }
 
-  update(id: number, updateProductDto: UpdateProductDto) {
-    return `This action updates a #${id} product`;
+  async update(id: number, updateProductDto: UpdateProductDto) {
+
+    const { id: __, ...data } = updateProductDto
+    await this.findOne(id)
+
+    if (!updateProductDto || Object.keys(updateProductDto).length === 0) {
+      throw new HttpException('Nothing to do', 304);
+    }
+
+    return this.product.update({
+      where: { id },
+      data: data
+    })
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} product`;
+  async remove(id: number) {
+
+    await this.findOne(id)
+    
+    //! hard delete
+    // return await this.product.delete({
+    //   where: { id }
+    // });
+
+    //* Soft delete
+    return await this.product.update({
+      where: { id },
+      data: {
+        available: false
+      }
+    });
   }
+
 }
+
+
+
+
+
+
